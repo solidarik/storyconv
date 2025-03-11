@@ -7,10 +7,10 @@ import (
 	"regexp"
 	"storyconv/config"
 
+	"github.com/go-shiori/go-epub"
 	"github.com/solidarik/goutils/fileutil"
 	"github.com/solidarik/goutils/strutil"
 
-	"github.com/go-shiori/go-epub"
 	"github.com/gocolly/colly"
 	_ "github.com/lib/pq"
 	"github.com/sirupsen/logrus"
@@ -37,9 +37,11 @@ func convertStory(story *Story) (*string, error) {
 	resultChan := make(chan FilepathWithError)
 
 	storyFolder := "storage/" + strutil.FilterAcceptableChars(strutil.GetLastPartOfURL(story.Url), nil)
+	epubFolder := "storage/epub"
 	os.RemoveAll(storyFolder)
 
 	fileutil.CreateFolder(storyFolder)
+	fileutil.CreateFolder(epubFolder)
 
 	c := colly.NewCollector()
 
@@ -107,7 +109,7 @@ func convertStory(story *Story) (*string, error) {
 			author = author + " - "
 		}
 		fileName := strutil.Transliterate(fmt.Sprintf("%+v%+v", author, story.Title), nil)
-		epubFilepath := fmt.Sprintf("%+v/%+v.epub", storyFolder, fileName)
+		epubFilepath := fmt.Sprintf("%+v/%+v.epub", epubFolder, fileName)
 		log.Debug("Print epubFilepath: ", epubFilepath)
 		err = epub.Write(epubFilepath)
 		if err != nil {
@@ -214,10 +216,35 @@ func connectDB() (*sql.DB, error) {
 	return db, err
 }
 
+func outputInfoToSummaryFile(story Story, title string) {
+	var file *os.File
+	var err error
+	if _, err := os.Stat("output.txt"); err == nil {
+		file, err = os.OpenFile("output.txt", os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Fatalln("Error opening file:", err)
+		}
+	} else {
+		file, err = os.Create("output.txt")
+		if err != nil {
+			log.Fatalln("Error creating file:", err)
+		}
+	}
+	defer file.Close()
+
+	_, err = file.WriteString(fmt.Sprintf("%s; %s\n", title, story.Url))
+	if err != nil {
+		log.Fatalln("Error writing to file:", err)
+	}
+}
+
 func main() {
 	log.SetLevel(logrus.InfoLevel)
 
-	stories, err := searchStory("Стрекоза и муравей автор Крылов")
+	title := "Маленький"
+	author := "Вильгельм Гауф"
+
+	stories, err := searchStory(fmt.Sprintf("%s автор %s", title, author))
 	if err != nil {
 		log.Fatalln("Error searching for story:", err)
 		return
@@ -226,8 +253,9 @@ func main() {
 	if stories != nil {
 		if len(stories) == 1 {
 			story := stories[0]
-			log.Printf("Название: %s\n", story.Title)
-			log.Printf("Автор: %s\n", story.Author.String)
+			title := fmt.Sprintf("%s - %s", story.Author.String, story.Title)
+			outputInfoToSummaryFile(story, title)
+			log.Printf("Название: %s\n", title)
 			log.Printf("Адрес: %s\n", story.Url)
 
 			storyFilepath := ""
